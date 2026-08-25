@@ -308,6 +308,9 @@ acquire_mark_lock_notify_builders(void)
 }
 #endif
 
+/* See the description in `gc_priv.h` file. */
+GC_INNER int GC_many_blocks = GC_MANY_BLOCKS_DEFAULT;
+
 GC_API void GC_CALL
 GC_generic_malloc_many(size_t lb_adjusted, int kind, void **result)
 {
@@ -453,7 +456,7 @@ GC_generic_malloc_many(size_t lb_adjusted, int kind, void **result)
     my_bytes_allocd = 0;
     for (p = op; p != NULL; p = obj_link(p)) {
       my_bytes_allocd += lb_adjusted;
-      if ((word)my_bytes_allocd >= HBLKSIZE) {
+      if (my_bytes_allocd >= (word)GC_many_blocks * HBLKSIZE) {
         *opp = obj_link(p);
         obj_link(p) = NULL;
         break;
@@ -462,14 +465,31 @@ GC_generic_malloc_many(size_t lb_adjusted, int kind, void **result)
     GC_bytes_allocd += my_bytes_allocd;
 
   } else {
-    /* Next try to allocate a new block worth of objects of this size. */
-    struct hblk *h
-        = GC_allochblk(lb_adjusted, kind, 0 /* `flags` */, 0 /* `align_m1` */);
+    /*
+     * Next try to allocate new blocks worth of objects of this size.
+     * Up to `GC_many_blocks` heap blocks are allocated per acquisition
+     * of the allocator lock, to reduce contention on it.
+     */
+    struct hblk *hbs[GC_MANY_BLOCKS_MAX];
+    int nblocks = GC_many_blocks;
+    int i;
 
-    if (h != NULL) {
+    if (nblocks < 1)
+      nblocks = 1;
+    if (nblocks > GC_MANY_BLOCKS_MAX)
+      nblocks = GC_MANY_BLOCKS_MAX;
+    for (i = 0; i < nblocks; i++) {
+      hbs[i] = GC_allochblk(lb_adjusted, kind, 0 /* `flags` */,
+                            0 /* `align_m1` */);
+      if (NULL == hbs[i])
+        break;
       if (IS_UNCOLLECTABLE(kind))
-        GC_set_hdr_marks(HDR(h));
+        GC_set_hdr_marks(HDR(hbs[i]));
       GC_bytes_allocd += HBLKSIZE - (HBLKSIZE % lb_adjusted);
+    }
+    nblocks = i;
+
+    if (nblocks > 0) {
 #ifdef PARALLEL_MARK
       if (GC_parallel) {
         GC_acquire_mark_lock();
@@ -477,7 +497,9 @@ GC_generic_malloc_many(size_t lb_adjusted, int kind, void **result)
         UNLOCK();
         GC_release_mark_lock();
 
-        op = GC_build_fl(h, NULL, lg, ok->ok_init || GC_debugging_started);
+        op = NULL;
+        for (i = 0; i < nblocks; i++)
+          op = GC_build_fl(hbs[i], op, lg, ok->ok_init || GC_debugging_started);
         *result = op;
 
         acquire_mark_lock_notify_builders();
@@ -486,7 +508,9 @@ GC_generic_malloc_many(size_t lb_adjusted, int kind, void **result)
       }
 #endif
 
-      op = GC_build_fl(h, NULL, lg, ok->ok_init || GC_debugging_started);
+      op = NULL;
+      for (i = 0; i < nblocks; i++)
+        op = GC_build_fl(hbs[i], op, lg, ok->ok_init || GC_debugging_started);
     } else {
       /*
        * As a last attempt, try allocating a single object.

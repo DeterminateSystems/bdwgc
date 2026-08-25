@@ -2702,6 +2702,19 @@ GC_EXTERN struct obj_kind {
 
 GC_EXTERN unsigned GC_n_kinds;
 
+/*
+ * Number of heap blocks worth of objects to hand out per allocation
+ * lock acquisition in `GC_generic_malloc_many()`.  Larger values reduce
+ * contention on the allocation lock when many threads allocate small
+ * objects heavily.  Settable at runtime via the `GC_MALLOC_MANY_BLOCKS`
+ * environment variable (clamped to `[1, GC_MANY_BLOCKS_MAX]`).
+ */
+#ifndef GC_MANY_BLOCKS_DEFAULT
+#  define GC_MANY_BLOCKS_DEFAULT 1
+#endif
+#define GC_MANY_BLOCKS_MAX 64
+GC_EXTERN int GC_many_blocks;
+
 /* May mean the allocation granularity size, not page size. */
 GC_EXTERN size_t GC_page_size;
 

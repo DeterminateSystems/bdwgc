@@ -1323,6 +1323,16 @@ GC_init(void)
   }
 #endif
   {
+    const char *str = GETENV("GC_MALLOC_MANY_BLOCKS");
+
+    if (str != NULL) {
+      int many_blocks = atoi(str);
+
+      if (many_blocks > 0 && many_blocks <= GC_MANY_BLOCKS_MAX)
+        GC_many_blocks = many_blocks;
+    }
+  }
+  {
     const char *str = GETENV("GC_FREE_SPACE_DIVISOR");
 
     if (str != NULL) {
