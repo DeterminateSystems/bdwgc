@@ -1982,6 +1982,15 @@ check_heap_stats(void)
 #ifdef MEMORY_SANITIZER
   max_heap_sz += max_heap_sz / 4;
 #endif
+#if defined(GC_TINY_FREELISTS) && GC_TINY_FREELISTS > 25
+  /*
+   * Larger thread-local free lists cause each thread to retain more
+   * nearly-empty heap blocks (up to one per size class and object
+   * kind) and increase block-level fragmentation, so allow the heap
+   * to grow proportionally.
+   */
+  max_heap_sz = max_heap_sz / 25 * GC_TINY_FREELISTS;
+#endif
   max_heap_sz *= n_tests;
 #if defined(USE_MMAP) || defined(MSWIN32)
   max_heap_sz = NUMBER_ROUND_UP(max_heap_sz, 4 * 1024 * 1024);
