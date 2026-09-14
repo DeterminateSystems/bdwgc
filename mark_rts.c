@@ -1071,3 +1071,157 @@ GC_push_roots(GC_bool all, ptr_t cold_gc_frame)
     (*GC_push_other_roots)();
   }
 }
+
+#ifdef USER_DEFINED_STACKS
+
+/*
+ * Client-registered stacks (`GC_register_stack`), sorted by `base`
+ * (ascending).  The table elements point to client-owned
+ * `struct GC_stack` objects.  See the description in `gc.h` file.
+ */
+STATIC struct GC_stack **GC_stacks_tbl = NULL;
+STATIC size_t GC_stacks_cnt = 0;
+STATIC size_t GC_stacks_capacity = 0;
+
+/*
+ * Incremented at the beginning of every `GC_push_all_stacks()`
+ * invocation; used to avoid scanning a stack both as the active stack
+ * of some stopped thread and through its `saved_sp` (see
+ * `GC_push_suspended_stacks`).
+ */
+STATIC GC_word GC_stacks_epoch = 0;
+
+GC_INNER void
+GC_stacks_next_epoch(void)
+{
+  ++GC_stacks_epoch;
+}
+
+/* Return the index of the first entry whose `base` is above `sp`. */
+STATIC size_t
+GC_stack_upper_bound(ptr_t sp)
+{
+  size_t low = 0;
+  size_t high = GC_stacks_cnt;
+
+  while (high > low) {
+    size_t mid = (low + high) >> 1;
+
+    if (ADDR_LT(sp, (ptr_t)GC_stacks_tbl[mid]->base)) {
+      high = mid;
+    } else {
+      low = mid + 1;
+    }
+  }
+  return low;
+}
+
+GC_INNER struct GC_stack *
+GC_active_stack_containing(ptr_t sp)
+{
+  size_t i = GC_stack_upper_bound(sp);
+  struct GC_stack *stk;
+
+  GC_ASSERT(I_HOLD_LOCK());
+  if (i == GC_stacks_cnt)
+    return NULL;
+  stk = GC_stacks_tbl[i];
+  if (stk->limit != NULL && ADDR_LT(sp, (ptr_t)stk->limit))
+    return NULL;
+  stk->scanned_epoch = GC_stacks_epoch;
+  return stk;
+}
+
+GC_INNER word
+GC_push_suspended_stacks(void)
+{
+  word total_size = 0;
+  size_t i;
+
+  GC_ASSERT(I_HOLD_LOCK());
+  for (i = 0; i < GC_stacks_cnt; i++) {
+    struct GC_stack *stk = GC_stacks_tbl[i];
+    ptr_t sp = (ptr_t)stk->saved_sp;
+
+    if (sp != NULL && stk->scanned_epoch != GC_stacks_epoch) {
+      GC_ASSERT(ADDR_LT(sp, (ptr_t)stk->base));
+      GC_push_all_stack(sp, (ptr_t)stk->base);
+      total_size += (word)((ptr_t)stk->base - sp);
+    }
+  }
+  return total_size;
+}
+
+GC_INNER void
+GC_register_stack_inner(struct GC_stack *stk)
+{
+  size_t i, j;
+
+  GC_ASSERT(I_HOLD_LOCK());
+  GC_ASSERT(stk->base != NULL);
+  GC_ASSERT(NULL == stk->limit
+            || ADDR_LT((ptr_t)stk->limit, (ptr_t)stk->base));
+  if (GC_stacks_cnt == GC_stacks_capacity) {
+    struct GC_stack **new_tbl;
+    size_t new_capacity
+        = 0 == GC_stacks_capacity ? 16 : GC_stacks_capacity * 2;
+
+    new_tbl = (struct GC_stack **)GC_scratch_alloc(
+        new_capacity * sizeof(struct GC_stack *));
+    if (NULL == new_tbl)
+      ABORT("Insufficient memory for the registered stacks table");
+    if (GC_stacks_cnt > 0)
+      BCOPY(GC_stacks_tbl, new_tbl,
+            GC_stacks_cnt * sizeof(struct GC_stack *));
+    /* The old table is deliberately dropped (it is scratch memory). */
+    GC_stacks_tbl = new_tbl;
+    GC_stacks_capacity = new_capacity;
+  }
+  /*
+   * Note: duplicate entries (with the same `base`) may transiently
+   * exist: the record of a finished thread (and thus its
+   * auto-registered stack) may linger until the thread is joined,
+   * while the stack memory has already been reused for a newly
+   * created thread.
+   */
+  i = GC_stack_upper_bound((ptr_t)stk->base);
+  for (j = GC_stacks_cnt; j > i; j--)
+    GC_stacks_tbl[j] = GC_stacks_tbl[j - 1];
+  GC_stacks_tbl[i] = stk;
+  ++GC_stacks_cnt;
+}
+
+GC_API void GC_CALL
+GC_register_stack(struct GC_stack *stk)
+{
+  LOCK();
+  GC_register_stack_inner(stk);
+  UNLOCK();
+}
+
+GC_INNER void
+GC_unregister_stack_inner(struct GC_stack *stk)
+{
+  size_t i = GC_stack_upper_bound((ptr_t)stk->base);
+
+  GC_ASSERT(I_HOLD_LOCK());
+  /* Skip over other entries with the same `base` (see above). */
+  while (i > 0 && GC_stacks_tbl[i - 1] != stk
+         && GC_stacks_tbl[i - 1]->base == stk->base)
+    --i;
+  if (UNLIKELY(0 == i || GC_stacks_tbl[i - 1] != stk))
+    ABORT("GC_unregister_stack: stack not registered");
+  for (; i < GC_stacks_cnt; i++)
+    GC_stacks_tbl[i - 1] = GC_stacks_tbl[i];
+  --GC_stacks_cnt;
+}
+
+GC_API void GC_CALL
+GC_unregister_stack(struct GC_stack *stk)
+{
+  LOCK();
+  GC_unregister_stack_inner(stk);
+  UNLOCK();
+}
+
+#endif /* USER_DEFINED_STACKS */
