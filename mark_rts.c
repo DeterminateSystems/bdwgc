@@ -1078,6 +1078,23 @@ GC_push_roots(GC_bool all, ptr_t cold_gc_frame)
  * Client-registered stacks (`GC_register_stack`), sorted by `base`
  * (ascending).  The table elements point to client-owned
  * `struct GC_stack` objects.  See the description in `gc.h` file.
+ *
+ * FIXME: before upstreaming, the synchronization of `saved_sp` needs
+ * work.  It is written by mutator threads and read by the collector
+ * with the world stopped; for threads suspended by the stop-the-world
+ * signal, the suspend handshake orders those plain writes, but a
+ * thread inside `GC_do_blocking` is not signal-stopped and keeps
+ * running, so it can switch stacks (mutating `saved_sp` and
+ * `GC_current_stack`) concurrently with `GC_active_stack_containing`
+ * and `GC_push_suspended_stacks` — e.g. clearing a fiber's `saved_sp`
+ * after the collector decided it is not the active stack but before
+ * reading it here, so the fiber is scanned neither way and its roots
+ * are lost.  The fix is to (a) document (and where possible assert)
+ * that switching between registered stacks is forbidden while the
+ * collector is in the "inactive" state for the current thread, and
+ * (b) access `saved_sp` through `GC_cptr_load`-style atomics (the
+ * plain `volatile` accesses below are formally a data race and will
+ * be flagged by TSan).
  */
 STATIC struct GC_stack **GC_stacks_tbl = NULL;
 STATIC size_t GC_stacks_cnt = 0;
