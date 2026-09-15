@@ -3620,13 +3620,14 @@ extern ptr_t GC_data_start;
 
 #if defined(GC_PTHREADS) && !defined(GC_WIN32_THREADS) && !defined(E2K) \
     && !defined(IA64) && !defined(SPARC) && !defined(NACL)              \
+    && !(defined(DARWIN) && defined(DARWIN_PARSE_STACK))                \
     && !defined(SN_TARGET_PSP2) && !defined(NO_USER_DEFINED_STACKS)
 /*
  * Support scanning of client-registered stacks (`GC_register_stack`).
- * The registration API is available whenever this is defined; the
- * scanning integration additionally requires the signal-based
- * stop-world implementation (i.e. it is not yet implemented in
- * `darwin_stop_world.c` file).
+ * Note: unsupported in case of `DARWIN_PARSE_STACK` because the stack
+ * upper bound is then determined by a frame-pointer walk from the
+ * captured stack pointer, which is incompatible with redirecting the
+ * scan to a registered stack.
  */
 #  define USER_DEFINED_STACKS
 #endif

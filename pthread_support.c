@@ -1832,6 +1832,13 @@ GC_set_my_stack_limit(struct GC_stack *stk)
       (void)pthread_attr_destroy(&attr);
     }
   }
+#    elif defined(DARWIN)
+  {
+    pthread_t self = pthread_self();
+
+    stk->limit = (char *)pthread_get_stackaddr_np(self)
+                 - pthread_get_stacksize_np(self);
+  }
 #    endif
 }
 
