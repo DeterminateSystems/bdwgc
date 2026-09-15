@@ -214,7 +214,8 @@ test_registration_churn(void)
   free(fs);
 }
 
-#  ifdef __linux__
+/* Note: musl has no makecontext/swapcontext, hence the glibc check. */
+#  if defined(__linux__) && defined(__GLIBC__)
 #    include <ucontext.h>
 
 #    define CTX_STACK_SIZE (256 * 1024)
@@ -283,7 +284,7 @@ test_stack_switch(void)
   GC_unregister_stack(&alt_gs);
   free(stack_mem);
 }
-#  endif /* __linux__ */
+#  endif /* __linux__ && __GLIBC__ */
 
 int
 main(void)
@@ -291,7 +292,7 @@ main(void)
   GC_INIT();
   test_suspended_retention();
   test_registration_churn();
-#  ifdef __linux__
+#  if defined(__linux__) && defined(__GLIBC__)
   test_stack_switch();
 #  endif
   printf("stacks test succeeded\n");
