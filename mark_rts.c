@@ -1079,6 +1079,17 @@ GC_push_roots(GC_bool all, ptr_t cold_gc_frame)
  * (ascending).  The table elements point to client-owned
  * `struct GC_stack` objects.  See the description in `gc.h` file.
  *
+ * The collector must only ever *read* the client-owned descriptors:
+ * they may live in memory that is write-protected during a collection
+ * (e.g. the descriptors of the threads' own stacks are embedded in
+ * `GC_StackContext_Rep` objects allocated from the collector's heap,
+ * whose pages are write-protected by `MPROTECT_VDB` in the incremental
+ * mode, and on Darwin the write-fault handler thread is stopped for
+ * the duration of the world stop, so a fault raised by the collector
+ * itself is never serviced).  Hence any collector-internal per-stack
+ * state, such as the scan epoch stamp, is kept in the table entries
+ * here (scratch memory, which is never write-protected).
+ *
  * FIXME: before upstreaming, the synchronization of `saved_sp` needs
  * work.  It is written by mutator threads and read by the collector
  * with the world stopped; for threads suspended by the stop-the-world
@@ -1096,7 +1107,16 @@ GC_push_roots(GC_bool all, ptr_t cold_gc_frame)
  * plain `volatile` accesses below are formally a data race and will
  * be flagged by TSan).
  */
-STATIC struct GC_stack **GC_stacks_tbl = NULL;
+struct GC_stack_entry {
+  struct GC_stack *stk;
+  /*
+   * The value of `GC_stacks_epoch` at the last time the stack was
+   * scanned as the active stack of some stopped thread.
+   */
+  GC_word scanned_epoch;
+};
+
+STATIC struct GC_stack_entry *GC_stacks_tbl = NULL;
 STATIC size_t GC_stacks_cnt = 0;
 STATIC size_t GC_stacks_capacity = 0;
 
@@ -1124,7 +1144,7 @@ GC_stack_upper_bound(ptr_t sp)
   while (high > low) {
     size_t mid = (low + high) >> 1;
 
-    if (ADDR_LT(sp, (ptr_t)GC_stacks_tbl[mid]->base)) {
+    if (ADDR_LT(sp, (ptr_t)GC_stacks_tbl[mid].stk->base)) {
       high = mid;
     } else {
       low = mid + 1;
@@ -1137,16 +1157,16 @@ GC_INNER struct GC_stack *
 GC_active_stack_containing(ptr_t sp)
 {
   size_t i = GC_stack_upper_bound(sp);
-  struct GC_stack *stk;
+  struct GC_stack_entry *entry;
 
   GC_ASSERT(I_HOLD_LOCK());
   if (i == GC_stacks_cnt)
     return NULL;
-  stk = GC_stacks_tbl[i];
-  if (stk->limit != NULL && ADDR_LT(sp, (ptr_t)stk->limit))
+  entry = &GC_stacks_tbl[i];
+  if (entry->stk->limit != NULL && ADDR_LT(sp, (ptr_t)entry->stk->limit))
     return NULL;
-  stk->scanned_epoch = GC_stacks_epoch;
-  return stk;
+  entry->scanned_epoch = GC_stacks_epoch;
+  return entry->stk;
 }
 
 GC_INNER word
@@ -1157,10 +1177,10 @@ GC_push_suspended_stacks(void)
 
   GC_ASSERT(I_HOLD_LOCK());
   for (i = 0; i < GC_stacks_cnt; i++) {
-    struct GC_stack *stk = GC_stacks_tbl[i];
+    struct GC_stack *stk = GC_stacks_tbl[i].stk;
     ptr_t sp = (ptr_t)stk->saved_sp;
 
-    if (sp != NULL && stk->scanned_epoch != GC_stacks_epoch) {
+    if (sp != NULL && GC_stacks_tbl[i].scanned_epoch != GC_stacks_epoch) {
       GC_ASSERT(ADDR_LT(sp, (ptr_t)stk->base));
       GC_push_all_stack(sp, (ptr_t)stk->base);
       total_size += (word)((ptr_t)stk->base - sp);
@@ -1179,17 +1199,17 @@ GC_register_stack_inner(struct GC_stack *stk)
   GC_ASSERT(NULL == stk->limit
             || ADDR_LT((ptr_t)stk->limit, (ptr_t)stk->base));
   if (GC_stacks_cnt == GC_stacks_capacity) {
-    struct GC_stack **new_tbl;
+    struct GC_stack_entry *new_tbl;
     size_t new_capacity
         = 0 == GC_stacks_capacity ? 16 : GC_stacks_capacity * 2;
 
-    new_tbl = (struct GC_stack **)GC_scratch_alloc(
-        new_capacity * sizeof(struct GC_stack *));
+    new_tbl = (struct GC_stack_entry *)GC_scratch_alloc(
+        new_capacity * sizeof(struct GC_stack_entry));
     if (NULL == new_tbl)
       ABORT("Insufficient memory for the registered stacks table");
     if (GC_stacks_cnt > 0)
       BCOPY(GC_stacks_tbl, new_tbl,
-            GC_stacks_cnt * sizeof(struct GC_stack *));
+            GC_stacks_cnt * sizeof(struct GC_stack_entry));
     /* The old table is deliberately dropped (it is scratch memory). */
     GC_stacks_tbl = new_tbl;
     GC_stacks_capacity = new_capacity;
@@ -1204,7 +1224,8 @@ GC_register_stack_inner(struct GC_stack *stk)
   i = GC_stack_upper_bound((ptr_t)stk->base);
   for (j = GC_stacks_cnt; j > i; j--)
     GC_stacks_tbl[j] = GC_stacks_tbl[j - 1];
-  GC_stacks_tbl[i] = stk;
+  GC_stacks_tbl[i].stk = stk;
+  GC_stacks_tbl[i].scanned_epoch = 0;
   ++GC_stacks_cnt;
 }
 
@@ -1223,10 +1244,10 @@ GC_unregister_stack_inner(struct GC_stack *stk)
 
   GC_ASSERT(I_HOLD_LOCK());
   /* Skip over other entries with the same `base` (see above). */
-  while (i > 0 && GC_stacks_tbl[i - 1] != stk
-         && GC_stacks_tbl[i - 1]->base == stk->base)
+  while (i > 0 && GC_stacks_tbl[i - 1].stk != stk
+         && GC_stacks_tbl[i - 1].stk->base == stk->base)
     --i;
-  if (UNLIKELY(0 == i || GC_stacks_tbl[i - 1] != stk))
+  if (UNLIKELY(0 == i || GC_stacks_tbl[i - 1].stk != stk))
     ABORT("GC_unregister_stack: stack not registered");
   for (; i < GC_stacks_cnt; i++)
     GC_stacks_tbl[i - 1] = GC_stacks_tbl[i];

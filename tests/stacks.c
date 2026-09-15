@@ -110,7 +110,6 @@ fake_stack_init(struct fake_stack *fs)
   fs->gs.base = &fs->ptrs[FAKE_STACK_PTRS];
   fs->gs.limit = &fs->ptrs[0];
   fs->gs.saved_sp = NULL;
-  fs->gs.scanned_epoch = 0;
 }
 
 static GC_word finalized_cnt = 0;
@@ -257,7 +256,6 @@ test_stack_switch(void)
   alt_gs.base = (char *)stack_mem + CTX_STACK_SIZE;
   alt_gs.limit = stack_mem;
   alt_gs.saved_sp = NULL;
-  alt_gs.scanned_epoch = 0;
   GC_register_stack(&alt_gs);
 
   CHECK(getcontext(&ctx_alt) == 0, "getcontext failed");

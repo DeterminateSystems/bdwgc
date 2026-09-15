@@ -1859,7 +1859,6 @@ GC_register_my_stack(GC_stack_context_t crtn)
   if (!crtn->stack_registered) {
     stk->base = (void *)crtn->stack_end;
     stk->saved_sp = NULL;
-    stk->scanned_epoch = 0;
     GC_set_my_stack_limit(stk);
     GC_register_stack_inner(stk);
     crtn->stack_registered = TRUE;

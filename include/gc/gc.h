@@ -2253,16 +2253,15 @@ GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
  * scanned from the captured stack pointer to `base`; a stack with a
  * non-`NULL` `saved_sp` is scanned from `saved_sp` to `base`; other
  * registered stacks (e.g. free stacks in a client-managed pool) are
- * not scanned at all.  `scanned_epoch` is used internally by the
- * collector; the client should initialize it to 0 and never touch it
- * afterwards.  The structure is owned by the client but must remain
- * valid and accessible while registered.
+ * not scanned at all.  The structure is owned by the client but must
+ * remain valid and accessible while registered; the collector only
+ * ever reads it (so it may live in memory that is write-protected
+ * during collections, e.g. the collector's own heap).
  */
 struct GC_stack {
   void *base;              /*< the cold end of the stack */
   void *limit;             /*< the hot end bound, or `NULL` if unknown */
   void *volatile saved_sp; /*< saved stack pointer, or `NULL` if none */
-  GC_word scanned_epoch;   /*< for internal use; initialize to 0 */
 };
 
 /**
