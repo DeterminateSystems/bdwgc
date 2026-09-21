@@ -2292,8 +2292,21 @@ GC_API void GC_CALL GC_unregister_stack(struct GC_stack *) GC_ATTR_NONNULL(1);
  * stack they are about to leave.
  */
 GC_API __thread struct GC_stack *GC_current_stack;
+
+/**
+ * Return an approximation of the current stack pointer: a value that is
+ * not above the actual one (it is taken in a callee of the caller, so
+ * the caller's own frame lies entirely above it).  Intended for clients
+ * implementing the stack switch protocol described above: the value to
+ * store to `saved_sp` of the stack being left is this minus some slack
+ * covering whatever the client's context switch machinery pushes below
+ * the point of the call (its call frames and, essentially, the block of
+ * callee-saved registers stored by the switch, which may hold pointers
+ * of the callers).
+ */
+GC_API void *GC_CALL GC_get_approx_sp(void);
 #  endif /* !GC_WIN32_THREADS */
-#endif /* GC_THREADS */
+#endif   /* GC_THREADS */
 
 /**
  * Wrapper for functions that are likely to block (or, at least, do not

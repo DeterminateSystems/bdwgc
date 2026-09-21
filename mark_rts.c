@@ -1262,4 +1262,10 @@ GC_unregister_stack(struct GC_stack *stk)
   UNLOCK();
 }
 
+GC_API void *GC_CALL
+GC_get_approx_sp(void)
+{
+  return GC_approx_sp();
+}
+
 #endif /* USER_DEFINED_STACKS */
