@@ -2237,7 +2237,76 @@ typedef void(GC_CALLBACK *GC_sp_corrector_proc)(void ** /* `sp_ptr` */,
                                                 void * /* `pthread_id` */);
 GC_API void GC_CALL GC_set_sp_corrector(GC_sp_corrector_proc);
 GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
-#endif /* GC_THREADS */
+
+#  if !defined(GC_WIN32_THREADS)
+/**
+ * A client-registered stack that the collector should scan for roots
+ * in addition to (or as part of) the registered threads' stacks.
+ * This provides first-class support for clients that switch between
+ * multiple stacks per thread (fibers, coroutines, green threads).
+ * `base` is the cold end of the stack, `limit` is the hot end bound
+ * (i.e. `base > limit`, assuming the stack grows down; `limit` may be
+ * `NULL` if unknown).  `saved_sp` should contain the saved stack
+ * pointer if the stack is suspended (that is, in use, but no thread is
+ * currently executing on it), otherwise `NULL`.  During a collection,
+ * a stack that some stopped thread is currently executing on is
+ * scanned from the captured stack pointer to `base`; a stack with a
+ * non-`NULL` `saved_sp` is scanned from `saved_sp` to `base`; other
+ * registered stacks (e.g. free stacks in a client-managed pool) are
+ * not scanned at all.  The structure is owned by the client but must
+ * remain valid and accessible while registered; the collector only
+ * ever reads it (so it may live in memory that is write-protected
+ * during collections, e.g. the collector's own heap).
+ */
+struct GC_stack {
+  void *base;              /*< the cold end of the stack */
+  void *limit;             /*< the hot end bound, or `NULL` if unknown */
+  void *volatile saved_sp; /*< saved stack pointer, or `NULL` if none */
+};
+
+/**
+ * Register (unregister) the given stack so that the collector scans it
+ * as described above.  The registered stacks of a process must not
+ * overlap.  A thread's own stack is registered automatically when the
+ * thread is registered, and unregistered when it is unregistered, so
+ * these functions are only needed for additional (fiber, coroutine)
+ * stacks.  Both functions acquire the allocator lock.  A registered
+ * stack must be unregistered before its memory is unmapped or reused
+ * for other purposes.
+ */
+GC_API void GC_CALL GC_register_stack(struct GC_stack *) GC_ATTR_NONNULL(1);
+GC_API void GC_CALL GC_unregister_stack(struct GC_stack *) GC_ATTR_NONNULL(1);
+
+/**
+ * The stack the current thread is executing on: initially the thread's
+ * own (automatically registered) stack.  A client switching the
+ * current thread to another registered stack (resuming a fiber or
+ * coroutine) is expected to save an approximation of the current stack
+ * pointer to `GC_current_stack->saved_sp`, and then to point
+ * `GC_current_stack` at the stack being switched to (whose `saved_sp`
+ * should be cleared by the code running on it, once resumed); and
+ * conversely when switching back.  The collector itself does not read
+ * this variable when scanning (it locates the active stack by the
+ * captured stack pointer); it is provided so that stack-switching
+ * clients have a well-defined place to find the descriptor of the
+ * stack they are about to leave.
+ */
+GC_API __thread struct GC_stack *GC_current_stack;
+
+/**
+ * Return an approximation of the current stack pointer: a value that is
+ * not above the actual one (it is taken in a callee of the caller, so
+ * the caller's own frame lies entirely above it).  Intended for clients
+ * implementing the stack switch protocol described above: the value to
+ * store to `saved_sp` of the stack being left is this minus some slack
+ * covering whatever the client's context switch machinery pushes below
+ * the point of the call (its call frames and, essentially, the block of
+ * callee-saved registers stored by the switch, which may hold pointers
+ * of the callers).
+ */
+GC_API void *GC_CALL GC_get_approx_sp(void);
+#  endif /* !GC_WIN32_THREADS */
+#endif   /* GC_THREADS */
 
 /**
  * Wrapper for functions that are likely to block (or, at least, do not

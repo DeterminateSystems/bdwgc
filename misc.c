@@ -874,6 +874,13 @@ STATIC int GC_stdout = GC_DEFAULT_STDOUT_FD;
 STATIC int GC_stderr = GC_DEFAULT_STDERR_FD;
 STATIC int GC_log = GC_DEFAULT_STDERR_FD;
 
+/*
+ * Write errors on the default `stderr` are ignored (e.g. it could be
+ * closed or be a pipe whose reader has exited), but not those on an
+ * explicitly specified log file.
+ */
+#  define GC_LOG_IS_DEFAULT_STDERR() (GC_DEFAULT_STDERR_FD == GC_log)
+
 #  ifndef MSWIN32
 GC_API void GC_CALL
 GC_set_log_fd(int fd)
@@ -2102,6 +2109,10 @@ GC_err_printf(const char *format, ...)
   GC_err_puts(buf);
 }
 
+#ifndef GC_LOG_IS_DEFAULT_STDERR
+#  define GC_LOG_IS_DEFAULT_STDERR() FALSE
+#endif
+
 void
 GC_log_printf(const char *format, ...)
 {
@@ -2109,11 +2120,7 @@ GC_log_printf(const char *format, ...)
 #ifdef NACL
   (void)WRITE(GC_log, buf, strlen(buf));
 #else
-  if (WRITE(GC_log, buf, strlen(buf)) < 0
-#  if (defined(CONSOLE_LOG) && defined(MSWIN32)) || defined(CYGWIN)
-      && GC_log != GC_DEFAULT_STDERR_FD
-#  endif
-  ) {
+  if (WRITE(GC_log, buf, strlen(buf)) < 0 && !GC_LOG_IS_DEFAULT_STDERR()) {
     ABORT("write to GC log failed");
   }
 #endif
