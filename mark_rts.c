@@ -1163,7 +1163,15 @@ GC_active_stack_containing(ptr_t sp)
   if (i == GC_stacks_cnt)
     return NULL;
   entry = &GC_stacks_tbl[i];
-  if (entry->stk->limit != NULL && ADDR_LT(sp, (ptr_t)entry->stk->limit))
+  /*
+   * If `sp` is not on any registered stack (e.g. it is on an alternate
+   * signal stack), then the found entry is an unrelated stack, which
+   * can only be told by its `limit`.  Thus, an entry without `limit`
+   * (only an auto-registered thread stack may lack it) is never
+   * matched; this is fine as a thread executing on its own stack is
+   * scanned up to that stack's `base` anyway.
+   */
+  if (NULL == entry->stk->limit || ADDR_LT(sp, (ptr_t)entry->stk->limit))
     return NULL;
   entry->scanned_epoch = GC_stacks_epoch;
   return entry->stk;
@@ -1232,6 +1240,8 @@ GC_register_stack_inner(struct GC_stack *stk)
 GC_API void GC_CALL
 GC_register_stack(struct GC_stack *stk)
 {
+  if (UNLIKELY(NULL == stk->limit))
+    ABORT("GC_register_stack: stack limit is not set");
   LOCK();
   GC_register_stack_inner(stk);
   UNLOCK();

@@ -1811,9 +1811,10 @@ __thread struct GC_stack *GC_current_stack = NULL;
 
 /*
  * Fill in the hot end bound of the current thread's stack, if the
- * platform provides a way to obtain it.  Knowing the bound makes the
- * containing-stack lookup in `GC_push_all_stacks` exact; a `NULL`
- * `limit` is a permitted fallback (see `gc.h` file).
+ * platform provides a way to obtain it.  A `NULL` `limit` is a permitted
+ * fallback for the thread's own stack (see `gc.h` file): such a stack is
+ * just never matched by `GC_active_stack_containing`, which does not
+ * matter as the thread's stack is scanned up to its `base` anyway.
  */
 STATIC void
 GC_set_my_stack_limit(struct GC_stack *stk)

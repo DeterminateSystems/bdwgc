@@ -2245,8 +2245,10 @@ GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
  * This provides first-class support for clients that switch between
  * multiple stacks per thread (fibers, coroutines, green threads).
  * `base` is the cold end of the stack, `limit` is the hot end bound
- * (i.e. `base > limit`, assuming the stack grows down; `limit` may be
- * `NULL` if unknown).  `saved_sp` should contain the saved stack
+ * (i.e. `base > limit`, assuming the stack grows down).  `limit` must
+ * be set for a client-registered stack; it may be `NULL` (if unknown)
+ * only for the automatically registered stack of a thread (see
+ * `GC_current_stack`).  `saved_sp` should contain the saved stack
  * pointer if the stack is suspended (that is, in use, but no thread is
  * currently executing on it), otherwise `NULL`.  During a collection,
  * a stack that some stopped thread is currently executing on is
@@ -2260,7 +2262,7 @@ GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
  */
 struct GC_stack {
   void *base;              /*< the cold end of the stack */
-  void *limit;             /*< the hot end bound, or `NULL` if unknown */
+  void *limit;             /*< the hot end bound (see above) */
   void *volatile saved_sp; /*< saved stack pointer, or `NULL` if none */
 };
 
