@@ -476,6 +476,12 @@ GC_start_incremental_collection(void)
 #endif
 }
 
+/*
+ * Heap size at which we need a collection to avoid expanding past
+ * limits used by black-listing.
+ */
+STATIC word GC_collect_at_heapsize = GC_WORD_MAX;
+
 GC_INNER GC_bool
 GC_should_collect(void)
 {
@@ -495,12 +501,8 @@ GC_should_collect(void)
   if (GC_disable_automatic_collection)
     return FALSE;
 
-  if (GC_last_heap_growth_gc_no == GC_gc_no) {
-    /* Avoid expanding past limits used by black-listing. */
-    return TRUE;
-  }
-
-  return GC_adj_bytes_allocd() >= last_min_bytes_allocd;
+  return GC_adj_bytes_allocd() >= last_min_bytes_allocd
+         || GC_heapsize >= GC_collect_at_heapsize;
 }
 
 /*
@@ -1645,6 +1647,16 @@ GC_add_to_heap(struct hblk *h, size_t sz)
   GC_freehblk(h);
   GC_heapsize += sz;
 
+  /*
+   * Normally the caller calculates a new `GC_collect_at_heapsize`, but
+   * this is also called directly from `GC_scratch_recycle_inner()`, so
+   * adjust here.  It will be recalculated when called from
+   * `GC_expand_hp_inner()`.
+   */
+  GC_collect_at_heapsize += sz;
+  if (GC_collect_at_heapsize < GC_heapsize /* wrapped */)
+    GC_collect_at_heapsize = GC_WORD_MAX;
+
   if (ADDR_GE((ptr_t)GC_least_plausible_heap_addr, (ptr_t)h)
       || UNLIKELY(NULL == GC_least_plausible_heap_addr)) {
     /*
@@ -1776,7 +1788,6 @@ GC_expand_hp_inner(word n)
     WARN("Failed to expand heap by %" WARN_PRIuPTR " KiB\n", sz >> 10);
     return FALSE;
   }
-  GC_last_heap_growth_gc_no = GC_gc_no;
   GC_INFOLOG_PRINTF("Grow heap to %lu KiB after %lu bytes allocated\n",
                     TO_KiB_UL(GC_heapsize + sz),
                     (unsigned long)GC_bytes_allocd);
@@ -1807,6 +1818,12 @@ GC_expand_hp_inner(word n)
   GC_last_heap_addr = ADDR(space);
 
   GC_add_to_heap(space, sz);
+
+  /* Force a collection before we are likely to exceed `expansion_slop`. */
+  GC_collect_at_heapsize
+      = GC_heapsize + expansion_slop - 2 * MAXHINCR * HBLKSIZE;
+  if (GC_collect_at_heapsize < GC_heapsize /* wrapped */)
+    GC_collect_at_heapsize = GC_WORD_MAX;
   if (GC_on_heap_resize)
     (*GC_on_heap_resize)(GC_heapsize);
 

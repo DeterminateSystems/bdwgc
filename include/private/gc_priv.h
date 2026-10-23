@@ -2079,10 +2079,6 @@ struct _GC_arrays {
 #define GC_atomic_in_use GC_arrays._atomic_in_use
   word _atomic_in_use;
 
-  /* GC number of latest successful `GC_expand_hp_inner()` call. */
-#define GC_last_heap_growth_gc_no GC_arrays._last_heap_growth_gc_no
-  word _last_heap_growth_gc_no;
-
   /*
    * Number of bytes of memory reclaimed minus the number of bytes originally
    * on free lists that we had to drop.  Protected by the allocator lock.
