@@ -3620,6 +3620,7 @@ extern ptr_t GC_data_start;
 
 #if defined(GC_PTHREADS) && !defined(GC_WIN32_THREADS) && !defined(E2K) \
     && !defined(IA64) && !defined(SPARC) && !defined(NACL)              \
+    && !defined(STACK_GROWS_UP)                                         \
     && !(defined(DARWIN) && defined(DARWIN_PARSE_STACK))                \
     && !defined(SN_TARGET_PSP2) && !defined(NO_USER_DEFINED_STACKS)
 /*
@@ -3627,7 +3628,9 @@ extern ptr_t GC_data_start;
  * Note: unsupported in case of `DARWIN_PARSE_STACK` because the stack
  * upper bound is then determined by a frame-pointer walk from the
  * captured stack pointer, which is incompatible with redirecting the
- * scan to a registered stack.
+ * scan to a registered stack.  Also unsupported if `STACK_GROWS_UP`
+ * because the implementation assumes that `base` is the upper bound
+ * of a stack.
  */
 #  define USER_DEFINED_STACKS
 #endif
