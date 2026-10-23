@@ -1819,7 +1819,12 @@ STATIC void
 GC_set_my_stack_limit(struct GC_stack *stk)
 {
   stk->limit = NULL;
-#    ifdef HAVE_PTHREAD_GETATTR_NP
+  /*
+   * The allocator lock is held here, and `pthread_getattr_np()` may call
+   * `realloc()`, so avoid it if `malloc` is redirected to the collector
+   * (as `GC_get_main_stack_base` does).
+   */
+#    if defined(HAVE_PTHREAD_GETATTR_NP) && !defined(REDIRECT_MALLOC)
   {
     pthread_attr_t attr;
 
