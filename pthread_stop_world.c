@@ -941,7 +941,7 @@ GC_push_all_stacks(void)
       {
         struct GC_stack *stk = GC_active_stack_containing(lo);
 
-        if (stk != NULL && (ptr_t)stk->base != hi) {
+        if (stk != NULL && stk != &crtn->stack && (ptr_t)stk->base != hi) {
           /*
            * The thread is currently executing on a client-registered
            * stack (e.g. a fiber or coroutine stack) other than its own
@@ -949,6 +949,10 @@ GC_push_all_stacks(void)
            * expected to be scanned through its `saved_sp` (see
            * `GC_push_suspended_stacks`).  The stack sections (if any)
            * belong to the thread's own stack, so skip them here.
+           * Note: the `base` of the thread's own stack descriptor is not
+           * updated if `stack_end` is changed later (by
+           * `GC_call_with_gc_active` or `GC_set_stackbottom`), hence the
+           * explicit check for that stack.
            */
           hi = (ptr_t)stk->base;
           traced_stack_sect = NULL;

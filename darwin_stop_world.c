@@ -401,7 +401,8 @@ GC_push_all_stacks(void)
           {
             struct GC_stack *stk = GC_active_stack_containing(lo);
 
-            if (stk != NULL && (ptr_t)stk->base != hi) {
+            if (stk != NULL && stk != &p->crtn->stack
+                && (ptr_t)stk->base != hi) {
               /*
                * The thread is currently executing on a client-registered
                * stack (e.g. a fiber or coroutine stack) other than its
