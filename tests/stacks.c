@@ -112,6 +112,7 @@ fake_stack_init(struct fake_stack *fs)
   fs->gs.saved_sp = NULL;
 }
 
+#  ifndef REDIRECT_MALLOC
 static GC_word finalized_cnt = 0;
 
 static void GC_CALLBACK
@@ -121,6 +122,7 @@ inc_finalized(void *obj, void *client_data)
   (void)client_data;
   ++finalized_cnt;
 }
+#  endif
 
 /*
  * Objects referenced only from a suspended registered stack must
@@ -150,7 +152,13 @@ test_suspended_retention(void)
   check_list((struct node *)fs->ptrs[FAKE_STACK_PTRS - 1], 50,
              "list referenced from suspended stack was clobbered");
 
-  /* An unused registered stack (`saved_sp` is null) is not scanned. */
+  /*
+   * An unused registered stack (`saved_sp` is null) is not scanned.
+   * This cannot be checked if `malloc` is redirected, since the fake
+   * stack is then itself allocated from the collector's heap (and thus
+   * scanned regardless of the stack registration).
+   */
+#  ifndef REDIRECT_MALLOC
   for (i = 0; i < FAKE_STACK_PTRS; i++) {
     struct node *p = (struct node *)GC_MALLOC(sizeof(struct node));
 
@@ -173,6 +181,7 @@ test_suspended_retention(void)
   CHECK(finalized_cnt > FAKE_STACK_PTRS / 2,
         "objects referenced only from an unused registered stack "
         "were retained");
+#  endif
 
   GC_unregister_stack(&fs->gs);
   free(fs);
