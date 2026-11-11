@@ -293,7 +293,7 @@ test_stack_switch(void)
 }
 #  endif /* __linux__ && __GLIBC__ */
 
-#  ifdef __linux__
+#  if defined(__linux__) || defined(__APPLE__)
 #    include <sys/resource.h>
 
 #    define GROWTH_FRAME_SIZE (16 * 1024)
@@ -309,7 +309,7 @@ test_stack_switch(void)
  *
  * As a 1 MiB growth stays within the typical 8 MiB stack size soft
  * limit, it does not detect a snapshot taken from that limit (as glibc
- * provides), hence the explicit check that `limit` is not set.
+ * and macOS provide), hence the explicit check that `limit` is not set.
  */
 static int
 grow_main_stack(int depth)
@@ -346,7 +346,7 @@ test_main_stack_growth(void)
   }
   CHECK(grow_main_stack(GROWTH_DEPTH) == 0, "unexpected stack contents");
 }
-#  endif /* __linux__ */
+#  endif /* __linux__ || __APPLE__ */
 
 int
 main(void)
@@ -357,7 +357,7 @@ main(void)
 #  if defined(__linux__) && defined(__GLIBC__)
   test_stack_switch();
 #  endif
-#  ifdef __linux__
+#  if defined(__linux__) || defined(__APPLE__)
   test_main_stack_growth();
 #  endif
   printf("stacks test succeeded\n");

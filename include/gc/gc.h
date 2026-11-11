@@ -2248,8 +2248,9 @@ GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
  * (i.e. `base > limit`, assuming the stack grows down).  `limit` must
  * be set for a client-registered stack; it may be `NULL` (if unknown,
  * or if there is no fixed bound, as for the stack of the initial thread
- * on Linux, which grows on demand) only for the automatically registered
- * stack of a thread (see `GC_current_stack`).  `saved_sp` should contain the saved stack
+ * on Linux and macOS, which can grow up to the stack size soft limit)
+ * only for the automatically registered stack of a thread (see
+ * `GC_current_stack`).  `saved_sp` should contain the saved stack
  * pointer if the stack is suspended (that is, in use, but no thread is
  * currently executing on it), otherwise `NULL`.  During a collection,
  * a stack that some stopped thread is currently executing on is
