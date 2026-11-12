@@ -13,9 +13,9 @@
  * Test the client-registered stacks support (`GC_register_stack`,
  * `GC_unregister_stack`, `GC_current_stack`): retention of objects
  * referenced only from a suspended registered stack, non-retention for
- * unused registered stacks, registration churn, and scanning of both
- * the active and the original stack across a `swapcontext()`-based
- * stack switch.
+ * unused registered stacks, registration churn, scanning of both the
+ * active and the original stack across a `swapcontext()`-based stack
+ * switch, and the `limit` of the main thread's (growable) stack.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -293,6 +293,61 @@ test_stack_switch(void)
 }
 #  endif /* __linux__ && __GLIBC__ */
 
+#  if defined(__linux__) || defined(__APPLE__)
+#    include <sys/resource.h>
+
+#    define GROWTH_FRAME_SIZE (16 * 1024)
+#    define GROWTH_DEPTH 64 /*< about 1 MiB in total */
+
+/*
+ * The stack of the main thread grows on demand, so its `limit` (if set
+ * at all) must not be a snapshot of the extent of the stack at the time
+ * it was registered: after growing the stack well beyond its initial
+ * mapping (e.g. 132 KiB) the stack pointer must still be within the
+ * bounds of the stack.  The buffer is read after the recursive call so
+ * that the call is not a tail call.
+ *
+ * As a 1 MiB growth stays within the typical 8 MiB stack size soft
+ * limit, it does not detect a snapshot taken from that limit (as glibc
+ * and macOS provide), hence the explicit check that `limit` is not set.
+ */
+static int
+grow_main_stack(int depth)
+{
+  volatile char buf[GROWTH_FRAME_SIZE];
+  int res = 0;
+
+  buf[0] = (char)depth;
+  buf[GROWTH_FRAME_SIZE - 1] = (char)depth;
+  if (depth > 0) {
+    res = grow_main_stack(depth - 1);
+  } else {
+    struct GC_stack *stk = GC_current_stack;
+    char *sp = (char *)GC_get_approx_sp();
+
+    CHECK(stk != NULL, "GC_current_stack not initialized");
+    CHECK(sp < (char *)stk->base, "stack pointer is above the stack base");
+    CHECK(NULL == stk->limit || sp >= (char *)stk->limit,
+          "main thread stack grew beyond its limit");
+    CHECK(NULL == stk->limit, "main thread stack has a limit");
+  }
+  return res + buf[0] - buf[GROWTH_FRAME_SIZE - 1];
+}
+
+static void
+test_main_stack_growth(void)
+{
+  struct rlimit rl;
+
+  if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY
+      && rl.rlim_cur < (rlim_t)2 * GROWTH_FRAME_SIZE * GROWTH_DEPTH) {
+    printf("main stack growth test skipped (stack size limit too low)\n");
+    return;
+  }
+  CHECK(grow_main_stack(GROWTH_DEPTH) == 0, "unexpected stack contents");
+}
+#  endif /* __linux__ || __APPLE__ */
+
 int
 main(void)
 {
@@ -301,6 +356,9 @@ main(void)
   test_registration_churn();
 #  if defined(__linux__) && defined(__GLIBC__)
   test_stack_switch();
+#  endif
+#  if defined(__linux__) || defined(__APPLE__)
+  test_main_stack_growth();
 #  endif
   printf("stacks test succeeded\n");
   return 0;

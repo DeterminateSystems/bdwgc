@@ -57,6 +57,9 @@
             && !defined(NO_MARKER_SPECIAL_SIGMASK))
 #      include <signal.h>
 #    endif
+#    if defined(USER_DEFINED_STACKS) && defined(LINUX)
+#      include <sys/syscall.h> /*< for `SYS_gettid` */
+#    endif
 #  endif /* !GC_WIN32_THREADS */
 
 #  ifdef E2K
@@ -1820,6 +1823,23 @@ STATIC void
 GC_set_my_stack_limit(struct GC_stack *stk)
 {
   stk->limit = NULL;
+  /*
+   * The stack of the initial thread of the process has no fixed hot end
+   * bound: it can grow up to the stack size soft limit, which may be
+   * raised later.  For that thread, the bounds reported by the system
+   * are only a snapshot (glibc derives them from the current soft limit,
+   * musl from the currently mapped extent of the stack, and macOS from
+   * the soft limit as well), which the stack may subsequently grow
+   * beyond.  So leave `limit` unset for it.  Note that the initial
+   * thread is not necessarily the one that called `GC_init()`.
+   */
+#    if defined(LINUX)
+  if (getpid() == (pid_t)syscall(SYS_gettid))
+    return;
+#    elif defined(DARWIN)
+  if (pthread_main_np())
+    return;
+#    endif
   /*
    * The allocator lock is held here, and `pthread_getattr_np()` may call
    * `realloc()`, so avoid it if `malloc` is redirected to the collector

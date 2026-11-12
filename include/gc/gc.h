@@ -2246,7 +2246,9 @@ GC_API GC_sp_corrector_proc GC_CALL GC_get_sp_corrector(void);
  * multiple stacks per thread (fibers, coroutines, green threads).
  * `base` is the cold end of the stack, `limit` is the hot end bound
  * (i.e. `base > limit`, assuming the stack grows down).  `limit` must
- * be set for a client-registered stack; it may be `NULL` (if unknown)
+ * be set for a client-registered stack; it may be `NULL` (if unknown,
+ * or if there is no fixed bound, as for the stack of the initial thread
+ * on Linux and macOS, which can grow up to the stack size soft limit)
  * only for the automatically registered stack of a thread (see
  * `GC_current_stack`).  `saved_sp` should contain the saved stack
  * pointer if the stack is suspended (that is, in use, but no thread is
@@ -2287,11 +2289,14 @@ GC_API void GC_CALL GC_unregister_stack(struct GC_stack *) GC_ATTR_NONNULL(1);
  * pointer to `GC_current_stack->saved_sp`, and then to point
  * `GC_current_stack` at the stack being switched to (whose `saved_sp`
  * should be cleared by the code running on it, once resumed); and
- * conversely when switching back.  The collector itself does not read
- * this variable when scanning (it locates the active stack by the
- * captured stack pointer); it is provided so that stack-switching
- * clients have a well-defined place to find the descriptor of the
- * stack they are about to leave.
+ * conversely when switching back.  Unlike client-registered stacks,
+ * which may be resumed by any thread, a thread's own stack must only
+ * ever be executed by that thread (its `limit` may be unset, so the
+ * collector cannot recognize it as another thread's active stack).
+ * The collector itself does not read this variable when scanning (it
+ * locates the active stack by the captured stack pointer); it is
+ * provided so that stack-switching clients have a well-defined place
+ * to find the descriptor of the stack they are about to leave.
  */
 GC_API __thread struct GC_stack *GC_current_stack;
 
